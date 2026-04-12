@@ -1,0 +1,85 @@
+.venv/
+venv/
+
+# Dataset and large files
+dataset/
+datasets/
+data/
+plantvillage dataset/
+PlantDoc-Dataset/
+weather_features.csv
+dcws_scores.csv
+yield_model.json
+best_model_v2.pth
+best_model.pth
+best_lstm.pth
+best_fusion.pth
+class_names.json
+fusion_config.json
+lstm_config.json
+archive.zip
+archive1.zip
+allfiles.txt
+structure.txt
+
+# Model checkpoints and saved weights
+*.h5
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.npy
+*.onnx
+*.zip
+*.tar
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Outputs and artifacts
+*.log
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.pdf
+*.tmp
+*.tmp.*
+
+# IDE and editor files
+.vscode/
+.idea/
+*.iml
+
+# Flutter / Dart
+**/build/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/pubspec.lock
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Runner/GeneratedPluginRegistrant.*
+**/android/.gradle/
+**/android/app/build/
+**/android/build/
+**/android/local.properties
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Other
+*.swp
+*~
+# ArchitectIQ graph cache
+.architectiq/

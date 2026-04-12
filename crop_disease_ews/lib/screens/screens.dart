@@ -1,0 +1,13 @@
+// lib/screens/screens.dart
+export 'home_screen.dart';
+export 'analyze_screen.dart';
+export 'forecast_screen.dart';
+export 'compare_screen.dart';
+export 'history_screen.dart';
+export 'settings_screen.dart';
+export 'profile_screen.dart';
+export 'edit_profile_screen.dart';
+export 'notifications_settings_screen.dart';
+export 'privacy_screen.dart';
+export 'app_preferences_screen.dart';
+export 'help_screen.dart';
