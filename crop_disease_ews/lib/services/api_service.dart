@@ -113,6 +113,27 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> recommendTreatment({
+    required String disease,
+    required String cropType,
+    required String growthStage,
+    required String riskLevel,
+    double areaHa = 1.0,
+  }) async {
+    try {
+      final resp = await _dio.post('/recommend', data: {
+        'disease': disease,
+        'crop_type': cropType,
+        'growth_stage': growthStage,
+        'risk_level': riskLevel,
+        'area_ha': areaHa,
+      });
+      return Map<String, dynamic>.from(resp.data);
+    } on DioException catch (e) {
+      throw ApiException('Recommendation failed: ${e.message}');
+    }
+  }
+
   // ── 7-day forecast ──
   Future<ForecastResult> getForecast({
     required double lat,

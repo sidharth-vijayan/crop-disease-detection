@@ -15,6 +15,7 @@ import 'screens/history_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/profile_screen.dart';
+import 'screens/recommendation_screen.dart';
 
 // ── Supabase credentials ──────────────────────────────────────────────────
 const _supabaseUrl     = 'https://clwbjefmnictvolnevai.supabase.co';
@@ -78,6 +79,7 @@ class CropDiseaseApp extends ConsumerWidget {
         '/history' : (_) => const HistoryScreen(),
         '/settings': (_) => const SettingsScreen(),
         '/profile' : (_) => const ProfileScreen(),
+        '/recommendations': (_) => const RecommendationScreen(),
         '/login'   : (_) => const LoginScreen(),
       },
     );

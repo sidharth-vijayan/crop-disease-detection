@@ -176,6 +176,26 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
 
       if (!mounted) return;
       setState(() { _result = result; _loading = false; _isOffline = false; });
+
+      final riskLevel = result.fusion?.riskScore != null
+          ? (result.fusion!.riskScore > 0.85
+              ? 'Critical'
+              : result.fusion!.riskScore > 0.6
+                  ? 'High'
+                  : result.fusion!.riskScore > 0.3
+                      ? 'Medium'
+                      : 'Low')
+          : 'Medium';
+      final recommendationArgs = {
+        'disease': detectedDisease,
+        'crop_type': _cropType,
+        'growth_stage': _growthStage,
+        'risk_level': riskLevel,
+        'area_ha': _areaHa,
+        'confidence': result.cnn?.confidence,
+        'prediction_id': predictionId,
+      };
+      Navigator.pushNamed(context, '/recommendations', arguments: recommendationArgs);
     } catch (e) {
       if (!mounted) return;
       setState(() { _error = e.toString(); _loading = false; });
