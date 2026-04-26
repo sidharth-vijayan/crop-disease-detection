@@ -1858,13 +1858,19 @@ def _run_analyze_sync(
     img_np    = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
     img_np = cv2.cvtColor(img_np, cv2.COLOR_BGR2RGB)
 
-     # Stage 0 — Leaf Segmentation (CV preprocessing)
+    # Stage 0 — Leaf Segmentation (CV preprocessing)
     seg_result = segment_leaf(img_np)           # runs on original resolution
     if seg_result.warning:
         print(f"[Segmentation] {seg_result.warning}")
 
+    # Stage 0b — Crop to leaf bounding box so CNN sees only leaf pixels
+    x, y, w, h = seg_result.bbox
+    _valid_crop    = w > 10 and h > 10
+    leaf_img       = seg_result.segmented_image[y:y+h, x:x+w] if _valid_crop else seg_result.segmented_image
+    leaf_mask_crop = seg_result.mask[y:y+h, x:x+w]             if _valid_crop else seg_result.mask
+
     # Stage 1 — CNN
-    resized = cv2.resize(seg_result.segmented_image, (IMG_SIZE, IMG_SIZE))
+    resized = cv2.resize(leaf_img, (IMG_SIZE, IMG_SIZE))
     tensor  = val_transform(image=resized)['image'].unsqueeze(0).to(DEVICE)
     with torch.inference_mode():
         logits = cnn_model(tensor)
@@ -1929,9 +1935,9 @@ def _run_analyze_sync(
     if include_gradcam:
         with torch.enable_grad():
             gradcam_result = run_gradcam(
-                seg_result.segmented_image,   # segmented image from Part 1
+                leaf_img,
                 cnn_class,
-                leaf_mask = seg_result.mask,  # mask from Part 1
+                leaf_mask = leaf_mask_crop,
             )
     else:
         gradcam_result = None
@@ -1962,6 +1968,7 @@ def _run_analyze_sync(
             'leaf_coverage' : round(seg_result.leaf_coverage, 3),
             'warning'       : seg_result.warning,
             'bbox'          : seg_result.bbox,
+            'bbox_crop'     : _valid_crop,
         },
         'quality': {
             'score'    : quality.score,
