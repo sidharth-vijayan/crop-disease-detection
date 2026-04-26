@@ -7,6 +7,9 @@ class AnalysisResult {
   final YieldData yield;
   final InterventionData intervention;
   final MetaData meta;
+  final Map<String, dynamic>? gradcam;
+  final SegmentationData? segmentation;
+  final QualityData? quality;
 
   AnalysisResult({
     required this.cnn,
@@ -15,6 +18,9 @@ class AnalysisResult {
     required this.yield,
     required this.intervention,
     required this.meta,
+    this.gradcam,
+    this.segmentation,
+    this.quality,
   });
 
   factory AnalysisResult.fromJson(Map<String, dynamic> j) => AnalysisResult(
@@ -33,6 +39,9 @@ class AnalysisResult {
         ),
         timestamp: j['timestamp'] ?? '',
       ),
+      gradcam: j['gradcam'] != null ? Map<String, dynamic>.from(j['gradcam']) : null,
+      segmentation: j['segmentation'] != null ? SegmentationData.fromJson(j['segmentation']) : null,
+      quality: j['quality'] != null ? QualityData.fromJson(j['quality']) : null,
     );
 
   Map<String, dynamic> toJson() => {
@@ -42,26 +51,26 @@ class AnalysisResult {
         'yield': yield.toJson(),
         'intervention': intervention.toJson(),
         'meta': meta.toJson(),
+        'gradcam': gradcam,
+        'segmentation': segmentation?.toJson(),
+        'quality': quality?.toJson(),
       };
 }
 
 class CnnResult {
   final String detected;
   final double confidence;
-  final String gradcamB64;
   final List<CnnTop5> top5;
 
   CnnResult({
     required this.detected,
     required this.confidence,
-    required this.gradcamB64,
     required this.top5,
   });
 
   factory CnnResult.fromJson(Map<String, dynamic> j) => CnnResult(
         detected: j['detected'] ?? '',
         confidence: (j['confidence'] ?? 0).toDouble(),
-        gradcamB64: j['gradcam_b64'] ?? '',
         top5: (j['top5'] as List? ?? [])
             .map((e) => CnnTop5.fromJson(e))
             .toList(),
@@ -70,7 +79,6 @@ class CnnResult {
   Map<String, dynamic> toJson() => {
         'detected': detected,
         'confidence': confidence,
-        'gradcam_b64': gradcamB64,
         'top5': top5.map((e) => e.toJson()).toList(),
       };
 }
@@ -402,4 +410,78 @@ class HistoricalResult {
         mean: (j['mean'] ?? 0).toDouble(),
         max: (j['max'] ?? 0).toDouble(),
       );
+}
+
+// ── Segmentation data ──
+class SegmentationData {
+  final String method;
+  final double leafCoverage;
+  final String? warning;
+  final List<int>? bbox;
+
+  SegmentationData({
+    required this.method,
+    required this.leafCoverage,
+    this.warning,
+    this.bbox,
+  });
+
+  factory SegmentationData.fromJson(Map<String, dynamic> j) => SegmentationData(
+        method: j['method'] ?? '',
+        leafCoverage: (j['leaf_coverage'] ?? 0).toDouble(),
+        warning: j['warning'],
+        bbox: j['bbox'] != null ? List<int>.from(j['bbox']) : null,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'method': method,
+        'leaf_coverage': leafCoverage,
+        'warning': warning,
+        'bbox': bbox,
+      };
+}
+
+// ── Quality data ──
+class QualityData {
+  final double score;
+  final List<String> warnings;
+  final Map<String, dynamic> metrics;
+
+  QualityData({
+    required this.score,
+    required this.warnings,
+    required this.metrics,
+  });
+
+  factory QualityData.fromJson(Map<String, dynamic> j) => QualityData(
+        score: (j['score'] ?? 0).toDouble(),
+        warnings: List<String>.from(j['warnings'] ?? []),
+        metrics: Map<String, dynamic>.from(j['metrics'] ?? {}),
+      );
+
+  Map<String, dynamic> toJson() => {
+        'score': score,
+        'warnings': warnings,
+        'metrics': metrics,
+      };
+}
+
+// ── Exceptions ──
+class ApiException implements Exception {
+  final String message;
+  ApiException(this.message);
+}
+
+class QualityRejectionException implements Exception {
+  final String reason;
+  final List<String> suggestions;
+  final double score;
+  final Map<String, dynamic> metrics;
+
+  QualityRejectionException({
+    required this.reason,
+    required this.suggestions,
+    required this.score,
+    required this.metrics,
+  });
 }

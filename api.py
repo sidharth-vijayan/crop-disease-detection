@@ -22,6 +22,10 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+from increment_1_cnn.leafseg import segment_leaf, SegmentationResult
+from increment_1_cnn.disease_localisation import localise_disease, LocalisationResult
+from increment_1_cnn.image_quality import check_image_quality, QualityResult
  
 warnings.filterwarnings('ignore')
 
@@ -303,16 +307,47 @@ def numpy_to_b64(img_array: np.ndarray) -> str:
     return base64.b64encode(buf).decode('utf-8')
  
  
-def run_gradcam(image_array: np.ndarray, class_idx: int) -> str:
-    """Returns base64-encoded Grad-CAM overlay."""
-    resized = cv2.resize(image_array, (IMG_SIZE, IMG_SIZE))
-    tensor  = val_transform(image=resized)['image']
-    cam, _, _ = cnn_model.grad_cam(tensor, class_idx)
-    cam_up    = cv2.resize(cam, (IMG_SIZE, IMG_SIZE))
-    heatmap   = cv2.applyColorMap(np.uint8(255 * cam_up), cv2.COLORMAP_JET)
-    overlay   = (0.5 * resized + 0.5 * heatmap).astype(np.uint8)
-    overlay_rgb = cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB)
-    return numpy_to_b64(overlay_rgb)
+def run_gradcam(image_array : np.ndarray,
+                    class_idx   : int,
+                    leaf_mask   : np.ndarray = None) -> dict:
+        """
+        Returns Grad-CAM overlay + disease localisation metrics.
+        Now returns a dict instead of a bare base64 string.
+        """
+        resized   = cv2.resize(image_array, (IMG_SIZE, IMG_SIZE))
+        tensor    = val_transform(image=resized)['image']
+        cam, _, _ = cnn_model.grad_cam(tensor, class_idx)   # cam is (h,w) float32
+
+        # If no leaf mask provided (e.g. called from /explain without Part 1),
+        # use a full-image mask as safe fallback.
+        if leaf_mask is None:
+            leaf_mask = np.full(resized.shape[:2], 255, dtype=np.uint8)
+        else:
+            leaf_mask = cv2.resize(leaf_mask, (IMG_SIZE, IMG_SIZE),
+                                   interpolation=cv2.INTER_NEAREST)
+
+        loc = localise_disease(
+            img_rgb   = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB),
+            cam_norm  = cam,
+            leaf_mask = leaf_mask,
+        )
+
+        return {
+            'gradcam'      : loc.annotated_b64,    # drop-in replacement
+            'infected_pct' : round(loc.infected_pct, 2),
+            'severity'     : loc.severity,
+            'spot_count'   : len(loc.spots),
+            'spots'        : [
+                {
+                    'id'           : i + 1,
+                    'bbox'         : s.bbox,
+                    'area_pct_leaf': round(s.area_pct_leaf, 2),
+                    'centroid'     : s.centroid,
+                }
+                for i, s in enumerate(loc.spots)
+            ],
+            'warning'      : loc.warning,
+        }
 
 # ── Thread pool for blocking ML inference ──
 # Keeps the asyncio event loop free; ML work runs in a dedicated OS thread.
@@ -1814,19 +1849,22 @@ def _run_analyze_sync(
     img_bytes, crop_type, growth_stage,
     days_since_planting, days_to_harvest,
     area_ha, market_price_per_kg,
-    n_mc_passes, include_gradcam, lat, lon
+    n_mc_passes, include_gradcam, lat, lon, quality
 ):
     """Synchronous full pipeline: CNN → LSTM → Fusion → Yield. 
     Runs in a ThreadPoolExecutor so the event loop stays free."""
     # Decode image
     img_array = np.frombuffer(img_bytes, dtype=np.uint8)
     img_np    = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-    if img_np is None:
-        raise ValueError("Could not decode uploaded image")
     img_np = cv2.cvtColor(img_np, cv2.COLOR_BGR2RGB)
 
+     # Stage 0 — Leaf Segmentation (CV preprocessing)
+    seg_result = segment_leaf(img_np)           # runs on original resolution
+    if seg_result.warning:
+        print(f"[Segmentation] {seg_result.warning}")
+
     # Stage 1 — CNN
-    resized = cv2.resize(img_np, (IMG_SIZE, IMG_SIZE))
+    resized = cv2.resize(seg_result.segmented_image, (IMG_SIZE, IMG_SIZE))
     tensor  = val_transform(image=resized)['image'].unsqueeze(0).to(DEVICE)
     with torch.inference_mode():
         logits = cnn_model(tensor)
@@ -1888,10 +1926,15 @@ def _run_analyze_sync(
     extras = assemble_forecast_and_yield(cnn_info, fusion_info, meta)
 
     # Grad-CAM (opt-in)
-    gradcam_b64 = None
     if include_gradcam:
         with torch.enable_grad():
-            gradcam_b64 = run_gradcam(img_np, cnn_class)
+            gradcam_result = run_gradcam(
+                seg_result.segmented_image,   # segmented image from Part 1
+                cnn_class,
+                leaf_mask = seg_result.mask,  # mask from Part 1
+            )
+    else:
+        gradcam_result = None
 
     return {
         'cnn': {
@@ -1913,7 +1956,18 @@ def _run_analyze_sync(
             ],
         },
         **extras,
-        'gradcam': gradcam_b64,
+        'gradcam': gradcam_result,
+        'segmentation': {
+            'method'        : seg_result.method_used,
+            'leaf_coverage' : round(seg_result.leaf_coverage, 3),
+            'warning'       : seg_result.warning,
+            'bbox'          : seg_result.bbox,
+        },
+        'quality': {
+            'score'    : quality.score,
+            'warnings' : [i.message for i in quality.issues if i.level == 'soft'],
+            'metrics'  : quality.metrics,
+        },
         'location': {'lat': lat, 'lon': lon},
         'timestamp': datetime.now().isoformat(),
     }
@@ -1937,6 +1991,24 @@ async def analyze(
     include_gradcam     : bool  = False,
 ):
     img_bytes = await file.read()
+    
+    # Quality gate
+    img_array = np.frombuffer(img_bytes, dtype=np.uint8)
+    img_np = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    if img_np is None:
+        raise HTTPException(status_code=400, detail="Could not decode uploaded image")
+    quality = check_image_quality(img_np)
+    if not quality.passed:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "image_quality_rejected",
+                "reason": quality.retake_reason,
+                "suggestions": quality.suggestions,
+                "score": quality.score,
+                "metrics": quality.metrics,
+            }
+        )
  
     loop   = asyncio.get_event_loop()
     result = await loop.run_in_executor(
@@ -1953,6 +2025,7 @@ async def analyze(
         include_gradcam,
         lat,
         lon,
+        quality,
     )
     return result
 

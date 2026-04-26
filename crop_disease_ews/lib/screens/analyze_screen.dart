@@ -176,30 +176,33 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
 
       if (!mounted) return;
       setState(() { _result = result; _loading = false; _isOffline = false; });
-
-      final riskLevel = result.fusion?.riskScore != null
-          ? (result.fusion!.riskScore > 0.85
-              ? 'Critical'
-              : result.fusion!.riskScore > 0.6
-                  ? 'High'
-                  : result.fusion!.riskScore > 0.3
-                      ? 'Medium'
-                      : 'Low')
-          : 'Medium';
-      final recommendationArgs = {
-        'disease': detectedDisease,
-        'crop_type': _cropType,
-        'growth_stage': _growthStage,
-        'risk_level': riskLevel,
-        'area_ha': _areaHa,
-        'confidence': result.cnn?.confidence,
-        'prediction_id': predictionId,
-      };
-      Navigator.pushNamed(context, '/recommendations', arguments: recommendationArgs);
     } catch (e) {
       if (!mounted) return;
-      setState(() { _error = e.toString(); _loading = false; });
+      if (e is QualityRejectionException) {
+        _showQualityRejectionDialog(e);
+      } else {
+        setState(() { _error = e.toString(); _loading = false; });
+      }
     }
+  }
+
+  void _showQualityRejectionDialog(QualityRejectionException e) {
+    setState(() { _loading = false; });
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _QualityRejectionSheet(
+        reason: e.reason,
+        suggestions: e.suggestions,
+        score: e.score,
+        onRetake: () {
+          Navigator.pop(context);
+          _showImagePicker(context);
+        },
+      ),
+    );
   }
 
   @override
@@ -533,6 +536,33 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> {
             if (_result != null) ...[
               const SizedBox(height: 24),
               AnalysisResultWidget(result: _result!),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: () {
+                  final detectedDisease = _result!.fusion?.topDisease ?? _result!.cnn?.detected;
+                  final riskLevel = _result!.fusion?.riskScore != null
+                      ? (_result!.fusion!.riskScore > 0.85
+                          ? 'Critical'
+                          : _result!.fusion!.riskScore > 0.6
+                              ? 'High'
+                              : _result!.fusion!.riskScore > 0.3
+                                  ? 'Medium'
+                                  : 'Low')
+                      : 'Medium';
+                  final recommendationArgs = {
+                    'disease': detectedDisease,
+                    'crop_type': _cropType,
+                    'growth_stage': _growthStage,
+                    'risk_level': riskLevel,
+                    'area_ha': _areaHa,
+                    'confidence': _result!.cnn?.confidence,
+                    'prediction_id': null, // since we removed saving
+                  };
+                  Navigator.pushNamed(context, '/recommendations', arguments: recommendationArgs);
+                },
+                icon: const Icon(Icons.medical_services),
+                label: const Text('Get Treatment Recommendations'),
+              ),
             ],
           ],
         ),
@@ -633,6 +663,158 @@ class _NumericFieldState extends State<_NumericField> {
         final parsed = double.tryParse(v);
         if (parsed != null) widget.onChanged(parsed);
       },
+    );
+  }
+}
+
+class _QualityRejectionSheet extends StatelessWidget {
+  final String reason;
+  final List<String> suggestions;
+  final double score;
+  final VoidCallback onRetake;
+
+  const _QualityRejectionSheet({
+    required this.reason,
+    required this.suggestions,
+    required this.score,
+    required this.onRetake,
+  });
+
+  Color get _scoreColor {
+    if (score >= 80) return Colors.green;
+    if (score >= 55) return Colors.orange;
+    return Colors.red;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        24, 16, 24,
+        24 + MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Drag handle
+          Center(
+            child: Container(
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Title row
+          Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded,
+                  color: Colors.orange, size: 26),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text('Photo Quality Issue',
+                    style: TextStyle(
+                        fontSize: 18, fontWeight: FontWeight.bold)),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _scoreColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: _scoreColor.withOpacity(0.4)),
+                ),
+                child: Text(
+                  '${score.toStringAsFixed(0)}/100',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: _scoreColor),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Reason
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.red.shade50,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.red.shade100),
+            ),
+            child: Text(reason,
+                style: TextStyle(
+                    fontSize: 14, color: Colors.red.shade800)),
+          ),
+
+          // Suggestions
+          if (suggestions.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Text('How to fix:',
+                style: TextStyle(
+                    fontWeight: FontWeight.w600, fontSize: 14)),
+            const SizedBox(height: 8),
+            ...suggestions.map((tip) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('→  ',
+                      style: TextStyle(
+                          color: Colors.green,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14)),
+                  Expanded(
+                    child: Text(tip,
+                        style: const TextStyle(fontSize: 13)),
+                  ),
+                ],
+              ),
+            )),
+          ],
+          const SizedBox(height: 20),
+
+          // Retake button
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: onRetake,
+              icon: const Icon(Icons.camera_alt_outlined),
+              label: const Text('Retake Photo'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                elevation: 0,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+
+          // Dismiss option
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Dismiss',
+                  style: TextStyle(color: Colors.grey.shade600)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

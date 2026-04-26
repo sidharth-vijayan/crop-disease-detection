@@ -19,6 +19,7 @@ class ApiService {
       connectTimeout: const Duration(seconds: 30),
       receiveTimeout: const Duration(seconds: 120),
       headers: {'Content-Type': 'application/json'},
+      validateStatus: (status) => status != null && status < 500,
     ));
     ready = _loadBaseUrl();
   }
@@ -107,7 +108,30 @@ class ApiService {
       });
 
       final resp = await _dio.post('/analyze', data: formData);
+
+      // Handle 422 quality rejection (no longer a DioException thanks to validateStatus)
+      if (resp.statusCode == 422) {
+        // FastAPI wraps HTTPException detail in {"detail": {...}}
+        final raw = resp.data;
+        final data = (raw is Map && raw['detail'] is Map)
+            ? Map<String, dynamic>.from(raw['detail'])
+            : (raw is Map ? Map<String, dynamic>.from(raw) : null);
+
+        if (data != null && data['error'] == 'image_quality_rejected') {
+          throw QualityRejectionException(
+            reason: data['reason'] ?? 'Unknown quality issue',
+            suggestions: List<String>.from(data['suggestions'] ?? []),
+            score: (data['score'] ?? 0).toDouble(),
+            metrics: Map<String, dynamic>.from(data['metrics'] ?? {}),
+          );
+        }
+        final reason = data?['reason'] ?? data?['detail'] ?? 'Unprocessable request (422)';
+        throw ApiException('Analysis failed: $reason');
+      }
+
       return AnalysisResult.fromJson(Map<String, dynamic>.from(resp.data));
+    } on QualityRejectionException {
+      rethrow;
     } on DioException catch (e) {
       throw ApiException('Analysis failed: ${e.message}');
     }

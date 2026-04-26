@@ -24,10 +24,18 @@ class AnalysisResultWidget extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        CnnCard(cnn: result.cnn),
+        // Quality warnings banner
+        if (result.quality != null && result.quality!.warnings.isNotEmpty)
+          QualityWarningsBanner(warnings: result.quality!.warnings),
+        CnnCard(cnn: result.cnn, gradcam: result.gradcam),
         const SizedBox(height: 12),
         FusionRiskCard(fusion: result.fusion),
         const SizedBox(height: 12),
+        if (result.gradcam != null &&
+            ((result.gradcam!['infected_pct'] as num?)?.toDouble() ?? 0) > 0) ...[
+          DiseaseLocalizationCard(gradcam: result.gradcam!),
+          const SizedBox(height: 12),
+        ],
         if (result.forecast.top5.isNotEmpty) ...[
           ForecastMiniCard(forecast: result.forecast),
           const SizedBox(height: 12),
@@ -35,6 +43,14 @@ class AnalysisResultWidget extends StatelessWidget {
         YieldImpactCard(yieldData: result.yield),
         const SizedBox(height: 12),
         InterventionCard(intervention: result.intervention),
+        const SizedBox(height: 12),
+        if (result.segmentation != null) ...[
+          SegmentationInfoCard(segmentation: result.segmentation!),
+          const SizedBox(height: 12),
+        ],
+        if (result.quality != null) ...[
+          QualityScoreCard(quality: result.quality!),
+        ],
       ],
     );
   }
@@ -46,7 +62,8 @@ class AnalysisResultWidget extends StatelessWidget {
 
 class CnnCard extends StatefulWidget {
   final CnnResult cnn;
-  const CnnCard({super.key, required this.cnn});
+  final Map<String, dynamic>? gradcam;
+  const CnnCard({super.key, required this.cnn, this.gradcam});
 
   @override
   State<CnnCard> createState() => _CnnCardState();
@@ -58,19 +75,19 @@ class _CnnCardState extends State<CnnCard> {
   @override
   void initState() {
     super.initState();
-    _decodeGradcam(widget.cnn.gradcamB64);
+    _decodeGradcam(widget.gradcam?['gradcam']);
   }
 
   @override
   void didUpdateWidget(CnnCard old) {
     super.didUpdateWidget(old);
-    if (old.cnn.gradcamB64 != widget.cnn.gradcamB64) {
-      _decodeGradcam(widget.cnn.gradcamB64);
+    if (old.gradcam?['gradcam'] != widget.gradcam?['gradcam']) {
+      _decodeGradcam(widget.gradcam?['gradcam']);
     }
   }
 
-  void _decodeGradcam(String b64) {
-    if (b64.isEmpty) { _gradcamBytes = null; return; }
+  void _decodeGradcam(String? b64) {
+    if (b64 == null || b64.isEmpty) { _gradcamBytes = null; return; }
     try { _gradcamBytes = base64Decode(b64); } catch (_) { _gradcamBytes = null; }
   }
 
@@ -680,6 +697,313 @@ class _InterventionStep extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ══════════════════════════════════════════
+// QUALITY WARNINGS BANNER
+// ══════════════════════════════════════════
+
+class QualityWarningsBanner extends StatelessWidget {
+  final List<String> warnings;
+  const QualityWarningsBanner({super.key, required this.warnings});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.amber.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: const Border(left: BorderSide(color: Colors.amber, width: 4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.warning_amber, size: 16, color: Colors.amber),
+              const SizedBox(width: 6),
+              Text('Image Quality Warnings', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...warnings.map((w) => Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text('• $w', style: const TextStyle(fontSize: 12)),
+          )),
+        ],
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════
+// DISEASE LOCALIZATION CARD
+// ══════════════════════════════════════════
+
+class DiseaseLocalizationCard extends StatefulWidget {
+  final Map<String, dynamic> gradcam;
+  const DiseaseLocalizationCard({super.key, required this.gradcam});
+
+  @override
+  State<DiseaseLocalizationCard> createState() => _DiseaseLocalizationCardState();
+}
+
+class _DiseaseLocalizationCardState extends State<DiseaseLocalizationCard> {
+  Uint8List? _imageBytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _decodeImage(widget.gradcam['gradcam']);
+  }
+
+  @override
+  void didUpdateWidget(DiseaseLocalizationCard old) {
+    super.didUpdateWidget(old);
+    if (old.gradcam['gradcam'] != widget.gradcam['gradcam']) {
+      _decodeImage(widget.gradcam['gradcam']);
+    }
+  }
+
+  void _decodeImage(String? b64) {
+    if (b64 == null || b64.isEmpty) { _imageBytes = null; return; }
+    try { _imageBytes = base64Decode(b64); } catch (_) { _imageBytes = null; }
+  }
+
+  Color _severityColor(String severity) {
+    switch (severity.toLowerCase()) {
+      case 'low':      return Colors.green;
+      case 'moderate': return Colors.orange;
+      case 'high':     return Colors.deepOrange;
+      case 'severe':   return Colors.red;
+      default:         return Colors.grey;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final gradcam        = widget.gradcam;
+    final infectedPct    = (gradcam['infected_pct'] as num?)?.toDouble() ?? 0.0;
+    final severity       = gradcam['severity'] as String? ?? 'Unknown';
+    final spotCount      = (gradcam['spot_count'] as num?)?.toInt() ?? 0;
+    final List spots     = gradcam['spots'] ?? [];
+    final String? gradcamWarning = gradcam['warning'] as String?;
+    final sevColor       = _severityColor(severity);
+
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(children: [
+              Icon(Icons.biotech_outlined, color: Colors.green),
+              const SizedBox(width: 8),
+              Text('Disease Localisation',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ]),
+            const Divider(height: 20),
+
+            // Annotated image
+            if (_imageBytes != null) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.memory(
+                  _imageBytes!,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    height: 150,
+                    color: Colors.grey.shade100,
+                    child: const Center(
+                      child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+            ],
+
+            // Infected area + severity badge in one row
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Infected Leaf Area',
+                          style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      const SizedBox(height: 4),
+                      Text('${infectedPct.toStringAsFixed(1)}%',
+                          style: TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                              color: sevColor)),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: sevColor.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: sevColor.withOpacity(0.4)),
+                  ),
+                  child: Text(severity,
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: sevColor,
+                          fontSize: 14)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Spot count
+            Row(children: [
+              Icon(Icons.location_on_outlined, size: 16, color: Colors.grey),
+              const SizedBox(width: 4),
+              Text('$spotCount disease region(s) detected',
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+            ]),
+
+            // Grad-CAM warning if present
+            if (gradcamWarning != null) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.amber.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, size: 16, color: Colors.amber.shade700),
+                    const SizedBox(width: 6),
+                    Expanded(child: Text(gradcamWarning,
+                        style: TextStyle(fontSize: 12,
+                            color: Colors.amber.shade800))),
+                  ],
+                ),
+              ),
+            ],
+
+            // Individual spots list — only show if > 1 spot
+            if (spots.length > 1) ...[
+              const SizedBox(height: 12),
+              Text('Affected regions:',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w600, fontSize: 13)),
+              const SizedBox(height: 6),
+              ...spots.take(5).map((spot) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(children: [
+                  Container(
+                    width: 20, height: 20,
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade400,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(
+                      child: Text('${spot['id']}',
+                          style: const TextStyle(color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text('Region ${spot['id']}: '
+                      '${(spot['area_pct_leaf'] as num).toStringAsFixed(1)}% of leaf',
+                      style: const TextStyle(fontSize: 12)),
+                ]),
+              )),
+              if (spots.length > 5)
+                Text('+ ${spots.length - 5} more regions',
+                    style: TextStyle(fontSize: 11, color: Colors.grey)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+// ══════════════════════════════════════════
+// SEGMENTATION INFO CARD
+// ══════════════════════════════════════════
+
+class SegmentationInfoCard extends StatelessWidget {
+  final SegmentationData segmentation;
+  const SegmentationInfoCard({super.key, required this.segmentation});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _CardHeader(
+              icon: Icons.cut,
+              title: 'Leaf Segmentation',
+              iconColor: AppTheme.primary,
+            ),
+            const Divider(height: 20),
+            Text('Method: ${segmentation.method}', style: const TextStyle(fontSize: 14)),
+            Text('Leaf Coverage: ${(segmentation.leafCoverage * 100).toStringAsFixed(1)}%', style: const TextStyle(fontSize: 14)),
+            if (segmentation.warning != null) ...[
+              const SizedBox(height: 8),
+              _WarningBanner(segmentation.warning!),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════
+// QUALITY SCORE CARD
+// ══════════════════════════════════════════
+
+class QualityScoreCard extends StatelessWidget {
+  final QualityData quality;
+  const QualityScoreCard({super.key, required this.quality});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _CardHeader(
+              icon: Icons.photo_camera,
+              title: 'Image Quality',
+              iconColor: AppTheme.primary,
+            ),
+            const Divider(height: 20),
+            Text('Score: ${quality.score.toStringAsFixed(1)}/100', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text('Metrics:', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            ...quality.metrics.entries.map((e) => Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text('${e.key}: ${e.value}', style: const TextStyle(fontSize: 12)),
+            )),
+          ],
+        ),
+      ),
     );
   }
 }
