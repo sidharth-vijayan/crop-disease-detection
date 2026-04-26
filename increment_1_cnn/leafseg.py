@@ -315,54 +315,6 @@ def segment_leaf(img_rgb: np.ndarray) -> SegmentationResult:
         warning=warning,
     )
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# HOW TO INTEGRATE INTO api.py
-# ─────────────────────────────────────────────────────────────────────────────
-#
-# Step 1: Add at the top of api.py (with the other imports):
-#
-#     from leaf_segmentation import segment_leaf, SegmentationResult
-#
-# Step 2: In `_run_analyze_sync()`, replace this block:
-#
-#     # Stage 1 — CNN
-#     resized = cv2.resize(img_np, (IMG_SIZE, IMG_SIZE))
-#     tensor  = val_transform(image=resized)['image'].unsqueeze(0).to(DEVICE)
-#
-# With:
-#
-#     # Stage 0 — Leaf Segmentation (CV preprocessing)
-#     seg_result = segment_leaf(img_np)           # runs on original resolution
-#     if seg_result.warning:
-#         print(f"[Segmentation] {seg_result.warning}")
-#
-#     # Stage 1 — CNN  (now receives clean leaf, not raw image)
-#     resized = cv2.resize(seg_result.segmented_image, (IMG_SIZE, IMG_SIZE))
-#     tensor  = val_transform(image=resized)['image'].unsqueeze(0).to(DEVICE)
-#
-# Step 3 (optional): Surface seg info back to Flutter via the API response.
-# In the `return { ... }` dict at the end of `_run_analyze_sync`, add:
-#
-#     'segmentation': {
-#         'method':        seg_result.method_used,
-#         'leaf_coverage': round(seg_result.leaf_coverage, 3),
-#         'warning':       seg_result.warning,
-#         'bbox':          seg_result.bbox,      # (x,y,w,h) for Part 2
-#     },
-#
-# Step 4 (for `run_gradcam()` too): The function in api.py also resizes
-# independently. Pass segmented image there as well:
-#
-#     def run_gradcam(image_array: np.ndarray, class_idx: int,
-#                     seg_result: SegmentationResult = None) -> str:
-#         src = seg_result.segmented_image if seg_result else image_array
-#         resized   = cv2.resize(src, (IMG_SIZE, IMG_SIZE))
-#         ...
-#
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 # ─────────────────────────────────────────────
 # Quick standalone test (run this file directly)
 # ─────────────────────────────────────────────
