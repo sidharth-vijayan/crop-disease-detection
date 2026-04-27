@@ -162,6 +162,12 @@ The repo appears to be organized as a research/deployment prototype with both mo
 - `increment_1_cnn/api.py`
   - A copy or variant of the inference API for the CNN experiment.
 
+- `increment_1_cnn/leafseg.py`
+  - Script for leaf segmentation, removing background noise (soil, sky, pots, hands) using HSV masking and GrabCut to isolate the leaf for better disease detection.
+
+- `increment_1_cnn/image_quality.py`
+  - Module for assessing image quality, checking for blur, brightness, contrast, and resolution to ensure images are suitable for accurate inference.
+
 - `increment_1_cnn/crop_disease_cnn.onnx` and `crop_disease_cnn_v2.onnx`
   - ONNX exports for deployment compatibility.
 
